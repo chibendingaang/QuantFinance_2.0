@@ -84,4 +84,53 @@ def plot_asset_var():
     plt.savefig(f'./Asset_n_Variance_Heston.png')
     plt.show()
 
+plot_asset_var()
 
+""" simulate Geometric BM process at time T """
+gbm = S0*np.exp( (r - theta**2/2)*T + np.sqrt(theta)*np.sqrt(T)*np.random.normal(0,1,M) )
+
+def plot_asset_pd():
+    fig, ax = plt.subplots()
+
+    ax = sns.kdeplot(S_p[-1], label=r"$\rho= 0.98$", ax=ax)
+    ax = sns.kdeplot(S_n[-1], label=r"$\rho= -0.98$", ax=ax)
+    ax = sns.kdeplot(gbm, label="GBM", ax=ax)
+
+    plt.title(r'Asset Price Density under Heston Model')
+    plt.xlim([20, 180])
+    plt.xlabel('$S_T$')
+    plt.ylabel('Density')
+    plt.legend()
+    plt.savefig(f'./Asset_pricedensity_Heston.png')
+    plt.show()
+
+plot_asset_pd()
+
+
+""" Volatility smile for the option chain """
+
+rho = -0.7
+S,v = heston_model_sim(S0, v0, rho, kappa, theta, sigma,T, N, M)
+
+# Set strikes and complete MC option price for different strikes
+K = np.arange(250,500,5)
+
+puts = np.array([np.exp(-r*T)*np.mean(np.maximum(k-S,0)) for k in K])
+calls = np.array([np.exp(-r*T)*np.mean(np.maximum(S-k,0)) for k in K])
+
+put_ivs = implied_vol(puts, S0, K, T, r, flag='p', q=0, return_as='numpy', on_error='ignore')
+call_ivs = implied_vol(calls, S0, K, T, r, flag='c', q=0, return_as='numpy')
+
+def plot_IV_Heston():
+    plt.plot(K, call_ivs, label=r'IV calls')
+    plt.plot(K, put_ivs, label=r'IV puts')
+
+    plt.ylabel('Implied Volatility')
+    plt.xlabel('Strike')
+
+    plt.title('Implied Volatility Smile from Heston Model')
+    plt.legend()
+    plt.savefig(f'./IV_smile_Heston.png')
+    plt.show()
+
+plot_IV_Heston()
