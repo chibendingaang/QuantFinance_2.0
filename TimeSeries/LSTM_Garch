@@ -1,1 +1,290 @@
+# %%
+import numpy as np
+import pandas as pd
+import tensorflow as tf
+from sklearn.preprocessing import MinMaxScaler
+import matplotlib.pyplot as plt
+%matplotlib inline
+import matplotlib.ticker as mtick
 
+# %% [markdown]
+# ## Parse Data
+
+# %%
+EURUSD_15 = pd.read_csv("./EURUSD_15min/EURUSD_15m_BID_01012010_to_31122016.csv",nrows=99999)
+EURUSD_15
+
+# %%
+def plot_line(data):
+    fig1, ax1 = plt.subplots(figsize=(12,  3), constrained_layout=True)
+    ax1.set_facecolor('black')
+
+    ax1.plot(data.index, data["Close"], c="cyan")
+    
+    return None
+
+# %%
+plot_line(EURUSD_15[-200:])
+
+# %%
+
+market_closed_mask = EURUSD_15["Volume"] == 0
+EURUSD = EURUSD_15[~market_closed_mask].reset_index()
+
+EURUSD
+
+# %%
+def plot_ohlc(data):
+    fig1, ax1 = plt.subplots(figsize=(12,  3), constrained_layout=True)
+    
+    for i in data.index:
+        ax1.vlines(i, ymin=data["Low"][i], ymax=data["High"][i], color="yellow", linewidth=1)
+    
+        if data["Close"][i] > data["Open"][i]:
+            ax1.vlines(i, ymin=data["Open"][i], ymax=data["Close"][i], color="green", linewidth=4)
+        elif data["Close"][i] < data["Open"][i]:
+            ax1.vlines(i, ymin=data["Close"][i], ymax=data["Open"][i], color="red", linewidth=4)
+        else:
+            ax1.vlines(i, ymin=data["Open"][i], ymax=data["Close"][i]+0.000001, color="red", linewidth=4)
+    ax1.set_facecolor('black')
+
+    return fig1, ax1
+
+# %%
+def heikinashi(df: pd.DataFrame) -> pd.DataFrame:
+    df_HA = df.copy()
+    df_HA['Close'] = (df_HA['Open'] + df_HA['High'] + df_HA['Low'] + df_HA['Close']) / 4
+ 
+    for i in range(0, len(df)):
+        if i == 0:
+            df_HA['Open'][i] = (df_HA['Open'][i] + df_HA['Close'][i]) / 2
+        else:
+            df_HA['Open'][i] = (df_HA['Open'][i-1] + df_HA['Close'][i-1]) / 2
+ 
+    df_HA['High'] = df_HA[['Open', 'Close', 'High']].max(axis=1)
+    df_HA['Low'] = df_HA[['Open', 'Close', 'Low']].min(axis=1)
+    return df_HA
+
+def plot_heikinashi(data):
+    # Apply Heikin Ashi transformation to data
+    ha_data = heikinashi(data)
+    
+    fig1, ax1 = plt.subplots(figsize=(12,  3), constrained_layout=True)
+    
+    # Plot Heikin Ashi candles using the same vertical line style
+    for i in ha_data.index:
+        # Plot the high-low line
+        ax1.vlines(i, ymin=ha_data["Low"][i], ymax=ha_data["High"][i], color="black", linewidth=2)
+        
+        # Candle body for bullish (green) and bearish (red) Heikin Ashi candles
+        if ha_data["Close"][i] > ha_data["Open"][i]:
+            ax1.vlines(i, ymin=ha_data["Open"][i], ymax=ha_data["Close"][i], color="green", linewidth=4)
+        elif ha_data["Close"][i] < ha_data["Open"][i]:
+            ax1.vlines(i, ymin=ha_data["Close"][i], ymax=ha_data["Open"][i], color="red", linewidth=4)
+        else:
+            ax1.vlines(i, ymin=ha_data["Open"][i], ymax=ha_data["Close"][i]+0.000001, color="red", linewidth=4)
+    
+    ax1.set_facecolor('black')
+    #ax1.plot(data.index, data["Close"], c="cyan")       
+    return fig1, ax1
+
+# %%
+plot_ohlc(EURUSD[-200:])
+#plot_heikinashi(EURUSD[-200:])
+
+# %% [markdown]
+# ## Distributions: Univariate
+
+# %%
+x = np.reshape(EURUSD["Close"].values, [len(EURUSD["Close"]), 1])
+
+# Feature Scaling
+sc = MinMaxScaler(feature_range=(0, 1))
+x = sc.fit_transform(x)
+
+# Train Test Split
+split = int(np.round(len(x) * 0.8, 0))
+
+xx = []
+yy = []
+
+for i in range(10, len(x)-1):
+    xx.append(x[i-10:i])
+    yy.append(x[i])
+    
+xx = np.reshape(xx, (len(xx), len(xx[0]), 1))
+yy = np.array(yy)
+
+xt, xv = xx[:split], xx[split:]
+yt, yv = yy[:split], yy[split:]
+
+# %%
+univariate_EURUSD_LSTM_model = tf.keras.Sequential([
+    tf.keras.layers.LSTM(8, return_sequences=True, input_shape=[xt.shape[0], 1]),
+    tf.keras.layers.LSTM(8, return_sequences=True),
+    tf.keras.layers.LSTM(8),
+    tf.keras.layers.Dense(1)
+])
+
+univariate_EURUSD_LSTM_model.compile(optimizer=tf.keras.optimizers.Adam(learning_rate=0.01),
+                                    loss="mse")
+history = univariate_EURUSD_LSTM_model.fit(xt, yt, epochs=20, verbose=1,
+                                          validation_data=(xv, yv),
+                                          callbacks=[tf.keras.callbacks.EarlyStopping(monitor="val_loss", patience=5)])
+
+# %%
+prediction = univariate_EURUSD_LSTM_model.predict(xv)
+
+# %%
+def plot_training_loss(history):
+    if "loss" in history.history.keys():
+        fig1, ax1 = plt.subplots(figsize=(12, 3), constrained_layout=True)
+        ax1.plot(history.history["loss"], label="MSE Train", color="blue")
+        ax1.legend()
+        ax1.grid()
+        ax1.set_facecolor('black')
+        ax1.set_title("Loss Function", fontsize=15)
+    if "val_loss" in history.history.keys():
+        fig2, ax2 = plt.subplots(figsize=(12, 3), constrained_layout=True)
+        ax2.plot(history.history["val_loss"], label="MSE Test", color="red")
+        ax2.legend()
+        ax2.grid()
+        ax2.set_facecolor('black')
+        ax2.set_xlabel("Epoch", fontsize=15)
+    return None
+
+# %%
+plot_training_loss(history)
+
+# %%
+def plot_predictions(actual, predicted):
+    #mse = tf.keras.metrics.mean_squared_error(actual, predicted)
+    mse = tf.keras.losses.mean_squared_error(actual, predicted)
+    fig1, ax1 = plt.subplots(figsize=(12, 3), constrained_layout=True)
+    ax1.plot(actual, label="Actual", color="blue")
+    ax1.plot(predicted, label="Predicted", color="red")
+    ax1.legend()
+    ax1.grid()
+    ax1.set_title("MSE: {}".format(mse))
+    return None
+
+# %%
+#actual = np.reshape(sc.inverse_transform(yv), -1)
+#prediction = np.reshape(sc.inverse_transform(prediction), -1)
+print(prediction.shape)
+print(actual.shape)
+plot_predictions(actual, prediction)
+
+# %% [markdown]
+# ## ARIMA-GARCH Signal
+
+# %%
+!pip3 install arch
+!pip3 install pmdarima
+
+# %%
+from arch import arch_model
+import pmdarima as pm
+from statsmodels.tsa.arima.model import ARIMA
+
+# %%
+def plot_arima_forecast(actual, pred_obj, train=[]):
+    fig1, ax1 = plt.subplots(figsize=(12,  3), constrained_layout=True)
+    
+    l, u = pred.conf_int().columns
+    lower = pred_obj.conf_int()[l]
+    upper = pred_obj.conf_int()[u]
+
+    x_label = np.arange(pred_obj.conf_int().index.start, pred_obj.conf_int().index.stop)
+    
+    if len(train):
+        ax1.plot(train, label="Train", color="black")
+    ax1.plot(actual, label="Actual", color="red")
+    ax1.plot(pred_obj.predicted_mean, label="Predicted", color="blue")
+    ax1.fill_between(x_label, upper, lower, color="grey", alpha=0.5)
+    ax1.legend()
+    
+    return None
+
+# %%
+ss = 100
+fc = 20
+returns = []
+n_positions = 0
+first_fc_day = 0
+last_fc_day = 0
+entry_price = None
+exit_price = None
+closes = EURUSD["Close"]
+fc_bound = []
+
+import warnings
+from statsmodels.tools.sm_exceptions import ConvergenceWarning
+warnings.simplefilter("ignore", ConvergenceWarning)
+warnings.simplefilter("ignore", UserWarning)
+warnings.simplefilter("ignore", RuntimeWarning)
+
+start = closes.index[-2000]
+stop = closes.index[-1]-fc-ss+1
+
+for i in range(start, stop):
+    if not len(fc_bound):
+        train = closes[i:i+ss]
+        test = closes[i+ss:i+ss+fc]
+        auto_arima = pm.auto_arima(train, seasonal=False, max_p=3, max_q=3,
+                                   stepwise=False, trace=False, suppress_warnings=True, error_action="ignore")
+        arima = ARIMA(train, order=auto_arima.order).fit()
+        pred = arima.get_forecast(fc, alpha=0.05)
+
+        fc_bound = pred.conf_int()
+        first_fc_day = fc_bound.index[0]
+        last_fc_day = fc_bound.index[-1]
+        
+        l, u = fc_bound.columns
+        lower = fc_bound[l]
+        upper = fc_bound[u]
+        
+        returns.append(1)
+        continue
+    if i < last_fc_day:
+        returns.append(1)
+        continue
+    elif i == last_fc_day:
+        for j in range(first_fc_day, last_fc_day+1):
+            if closes[j] <= lower[j]: # buy signal
+                entry_price = closes[j]
+                exit_price = closes[last_fc_day]
+                n_positions += 1
+                r = exit_price / entry_price
+                returns.append(r)
+                plot_arima_forecast(test, pred, train)
+                break
+            elif closes[j] >= upper[j]: # sell signal
+                entry_price = closes[j]
+                exit_price = closes[last_fc_day]
+                n_positions += 1
+                r = entry_price / exit_price
+                returns.append(r)
+                plot_arima_forecast(test, pred, train)
+                break
+        while len(returns) < last_fc_day:
+            returns.append(1)
+        # reset
+        fc_bound = []
+        entry_price = None
+        exit_price = None
+    # in between prompt #
+    print("Index at:", i, "/", len(closes)-1)
+
+# %%
+# Return Statistics
+returns = np.array(returns)
+equity = np.cumprod(returns)
+quality = np.sum(returns > 1) / n_positions
+
+fig, ax = plt.subplots(figsize=(12, 6), constrained_layout=True)
+
+ax.plot(equity, color="blue")
+ax.set_title("Equity Return / Signal quality: {:.2%}".format(quality))
+ax.yaxis.set_major_formatter(mtick.PercentFormatter(xmax=1.0, decimals=2))
+ax.grid()
