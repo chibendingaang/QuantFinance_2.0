@@ -4,7 +4,7 @@ from statsmodels.tsa.stattools import adfuller
 from sklearn.linear_model import LinearRegression
 
 # Load the historical data
-file_path = '~/Quant_Fin/EURUSD_15min/EURUSD_15m_BID_01012010_to_31122016.csv'
+file_path = '/Data/EURUSD_15m_BID_01012010_to_31122016.csv'
 data = pd.read_csv(file_path)
 data['Time'] = pd.to_datetime(data['Time'])
 
